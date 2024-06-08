@@ -1,6 +1,5 @@
 use std::{collections::HashMap, time::Duration};
 
-use canvas::Line;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{prelude::*, widgets::*};
@@ -8,16 +7,23 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{Component, Frame};
-use crate::{action::Action, config::Config};
+use crate::{
+    action::Action,
+    config::{Config, KeyBindings},
+};
 
 #[derive(Default)]
-pub struct Home {
+pub struct LoginGauge {
     progress: f64,
+    config: Config,
 }
 
-impl Home {
+impl LoginGauge {
     pub fn new() -> Self {
-        Self { progress: 0.0 }
+        Self {
+            progress: 0.0,
+            ..Self::default()
+        }
     }
 
     fn set_progress(&mut self, progress: f64) {
@@ -25,12 +31,13 @@ impl Home {
     }
 }
 
-impl Component for Home {
+impl Component for LoginGauge {
     fn register_action_handler(&mut self, tx: UnboundedSender<Action>) -> Result<()> {
         Ok(())
     }
 
     fn register_config_handler(&mut self, config: Config) -> Result<()> {
+        self.config = config;
         Ok(())
     }
 

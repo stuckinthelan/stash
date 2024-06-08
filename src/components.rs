@@ -11,6 +11,7 @@ use crate::{
 
 pub mod fps;
 pub mod home;
+pub mod login_gauge;
 pub mod login_splash;
 
 /// `Component` is a trait that represents a visual and interactive element of the user interface.

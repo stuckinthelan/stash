@@ -1,13 +1,16 @@
 use color_eyre::eyre::Result;
 use crossterm::event::KeyEvent;
-use ratatui::prelude::Rect;
+use futures::sink::Send;
+use ratatui::{layout::Constraint, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::{
     action::Action,
-    components::{fps::FpsCounter, home::Home, login_splash::LoginSplash, Component},
+    components::{
+        fps::FpsCounter, home::Home, login_gauge::LoginGauge, login_splash::LoginSplash, Component,
+    },
     config::Config,
     mode::Mode,
     tui,
@@ -35,12 +38,13 @@ impl App {
         let home = Home::new();
         let fps = FpsCounter::default();
         let login_splash = LoginSplash::new();
+        let login_gauge = LoginGauge::new();
         let config = Config::new()?;
         let mode = Mode::Home;
         Ok(Self {
             tick_rate,
             frame_rate,
-            components: vec![Box::new(login_splash), Box::new(fps)],
+            components: vec![Box::new(login_gauge), Box::new(login_splash), Box::new(fps)],
             should_quit: false,
             should_suspend: false,
             config,
@@ -166,10 +170,11 @@ impl App {
         tui.exit()?;
         Ok(())
     }
-}
-pub async fn send_startup_message(tx: &UnboundedSender<Action>, message: &str) -> Result<()> {
-    let mut map = HashMap::new();
-    map.insert("startup".to_string(), message.to_string());
-    tx.send(Action::Message(map))?;
-    Ok(())
+
+    pub async fn send_startup_message(tx: &UnboundedSender<Action>, message: &str) -> Result<()> {
+        let mut map = HashMap::new();
+        map.insert("startup".to_string(), message.to_string());
+        tx.send(Action::Message(map))?;
+        Ok(())
+    }
 }

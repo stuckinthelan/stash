@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use futures::future::Inspect;
+use libc::posix_spawn_file_actions_addtcsetpgrp_np;
 use ratatui::{prelude::*, widgets::*};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -11,7 +12,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::{Component, Frame};
 use crate::{
     action::Action,
-    app::send_startup_message,
     config::{Config, KeyBindings},
 };
 
@@ -126,8 +126,9 @@ impl Component for LoginSplash {
     fn draw(&mut self, f: &mut Frame<'_>, area: Rect) -> Result<()> {
         let frame = &self.logo_frames[self.counter];
         let frame_lines: Vec<&str> = frame.lines().collect();
-        let lines_above = (area.height as usize - frame_lines.len()) / 2;
-        let lines_below = area.height as usize - lines_above - frame_lines.len();
+        let total_lines = frame_lines.len() + 1;
+        let lines_above = (area.height as usize - total_lines) / 2;
+        let lines_below = area.height as usize - lines_above - total_lines;
 
         let mut text = Text::default();
         for _ in 0..lines_above {
@@ -136,19 +137,24 @@ impl Component for LoginSplash {
         for line in frame_lines {
             text.lines.push(Line::from(line));
         }
-        for _ in 0..lines_below {
-            text.lines.push(Line::from(""));
-        }
+
+        // add a blank line between the logo and loading message
+        text.lines.push(Line::from(""));
 
         let loading_message = if !self.loading_messages.is_empty() {
             &self.loading_messages[self.counter % self.loading_messages.len()]
         } else {
+            // Add better error messages
             "Loading..."
         };
         text.lines.push(Line::from(loading_message));
 
-        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
-        f.render_widget(paragraph, area);
+        for _ in 0..lines_below {
+            text.lines.push(Line::from(""));
+        }
+
+        let p = Paragraph::new(text).alignment(Alignment::Center);
+        f.render_widget(p, area);
         Ok(())
     }
 }
