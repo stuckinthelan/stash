@@ -1,16 +1,17 @@
 use color_eyre::eyre::Result;
 use crossterm::event::KeyEvent;
+use fantoccini::{Client, ClientBuilder, Locator};
 use futures::sink::Send;
 use ratatui::{layout::Constraint, prelude::*};
 use serde::{Deserialize, Serialize};
+use std::process::Command;
 use std::{collections::HashMap, env};
 use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::time::{sleep, Duration};
 
 use crate::{
     action::Action,
-    components::{
-        fps::FpsCounter, home::Home, login_gauge::LoginGauge, login_splash::LoginSplash, Component,
-    },
+    components::{login::LoginComponent, Component},
     config::Config,
     mode::Mode,
     tui,
@@ -27,6 +28,7 @@ pub struct App {
     pub last_tick_key_events: Vec<KeyEvent>,
     pub fivver_username: String,
     pub fivver_password: String,
+    pub web_client: Option<Client>,
 }
 
 impl App {
@@ -35,16 +37,15 @@ impl App {
             env::var("FIVVER_USERNAME").expect("FIVER_USERNAME environment variable is not set");
         let fivver_password =
             env::var("FIVVER_PASSWORD").expect("FIVVER_PASSWORD environment variable is not set");
-        let home = Home::new();
-        let fps = FpsCounter::default();
-        let login_splash = LoginSplash::new();
-        let login_gauge = LoginGauge::new();
+        let login = LoginComponent::new();
         let config = Config::new()?;
         let mode = Mode::Home;
+        let web_client = None;
+
         Ok(Self {
             tick_rate,
             frame_rate,
-            components: vec![Box::new(login_gauge), Box::new(login_splash), Box::new(fps)],
+            components: vec![Box::new(login)],
             should_quit: false,
             should_suspend: false,
             config,
@@ -52,6 +53,7 @@ impl App {
             last_tick_key_events: Vec::new(),
             fivver_username,
             fivver_password,
+            web_client,
         })
     }
 
@@ -75,6 +77,8 @@ impl App {
         for component in self.components.iter_mut() {
             component.init(tui.size()?)?;
         }
+
+        self.fetch_data(action_tx.clone()).await?;
 
         loop {
             if let Some(e) = tui.next().await {
@@ -118,7 +122,12 @@ impl App {
                     Action::Tick => {
                         self.last_tick_key_events.drain(..);
                     }
-                    Action::Quit => self.should_quit = true,
+                    Action::Quit => {
+                        self.should_quit = true;
+                        self.close_web_client()
+                            .await
+                            .expect("Failed to close WebDriver client");
+                    }
                     Action::Suspend => self.should_suspend = true,
                     Action::Resume => self.should_suspend = false,
                     Action::Resize(w, h) => {
@@ -171,10 +180,52 @@ impl App {
         Ok(())
     }
 
-    pub async fn send_startup_message(tx: &UnboundedSender<Action>, message: &str) -> Result<()> {
-        let mut map = HashMap::new();
-        map.insert("startup".to_string(), message.to_string());
-        tx.send(Action::Message(map))?;
+    async fn fetch_data(&mut self, tx: UnboundedSender<Action>) -> Result<()> {
+        let mut message1 = HashMap::new();
+        message1.insert("startup".to_string(), "Starting Geckodriver...".to_string());
+        tx.send(Action::Message(message1))?;
+
+        if self.web_client.is_none() {
+            self.init_web_client().await?;
+        }
+        Ok(())
+    }
+
+    async fn is_geckodriver_running(&self) -> bool {
+        if let Ok(output) = Command::new("pgrep").arg("geckodriver").output() {
+            !output.stdout.is_empty()
+        } else {
+            false
+        }
+    }
+
+    async fn start_geckodriver(&self) -> Result<()> {
+        Command::new("geckodriver")
+            .spawn()
+            .expect("Failed to start geckodriver");
+        Ok(())
+    }
+
+    async fn init_web_client(&mut self) -> Result<()> {
+        if !self.is_geckodriver_running().await {
+            self.start_geckodriver().await?;
+            sleep(Duration::from_secs(2)).await;
+        }
+        let client = ClientBuilder::native()
+            .connect("http://localhost:4444")
+            .await
+            .expect("failed to connect to WebDriver");
+        self.web_client = Some(client);
+        Ok(())
+    }
+
+    async fn close_web_client(&mut self) -> Result<()> {
+        if let Some(client) = &self.web_client {
+            // self.web_client
+            //     .close()
+            //     .await
+            //     .expect("Failed to close WebDriver client");
+        }
         Ok(())
     }
 }

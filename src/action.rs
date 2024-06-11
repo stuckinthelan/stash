@@ -19,4 +19,5 @@ pub enum Action {
     Error(String),
     Help,
     Message(HashMap<String, String>),
+    Fetch,
 }

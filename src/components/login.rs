@@ -1,10 +1,7 @@
-use std::time::Instant;
 use std::{collections::HashMap, time::Duration};
 
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
-use futures::future::Inspect;
-use libc::posix_spawn_file_actions_addtcsetpgrp_np;
 use ratatui::{prelude::*, widgets::*};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -16,18 +13,22 @@ use crate::{
 };
 
 #[derive(Default)]
-pub struct LoginSplash {
+pub struct LoginComponent {
+    // Splash screen related fields
     command_tx: Option<UnboundedSender<Action>>,
     config: Config,
     counter: usize,
     logo_frames: Vec<String>,
     is_animated: bool,
     loading_messages: Vec<String>,
+
+    // Gauge related fields
+    progress: f64,
+    total_loading_messages: usize,
 }
 
-impl LoginSplash {
+impl LoginComponent {
     pub fn new() -> Self {
-        let counter = 0;
         let logo_frames = vec![
             r"     __
     / /
@@ -79,18 +80,32 @@ impl LoginSplash {
 /_/                            "
                 .to_string(),
         ];
-        let is_animated = true;
 
         Self {
-            counter,
+            counter: 0,
             logo_frames,
-            is_animated,
+            progress: 0.0,
+            total_loading_messages: 3,
+            is_animated: true,
             ..Self::default()
+        }
+    }
+
+    fn set_progress(&mut self, progress: f64) {
+        self.progress = progress;
+    }
+
+    fn update_progress(&mut self) {
+        let message_count = self.loading_messages.len();
+        if message_count >= self.total_loading_messages {
+            self.progress = 1.0;
+        } else {
+            self.progress = message_count as f64 / self.total_loading_messages as f64
         }
     }
 }
 
-impl Component for LoginSplash {
+impl Component for LoginComponent {
     fn register_action_handler(&mut self, tx: UnboundedSender<Action>) -> Result<()> {
         self.command_tx = Some(tx);
         Ok(())
@@ -114,21 +129,27 @@ impl Component for LoginSplash {
             }
             Action::Message(map) => {
                 if let Some(startup_message) = map.get("startup") {
-                    self.loading_messages.push(startup_message.clone())
+                    self.loading_messages.push(startup_message.clone());
+                    self.update_progress();
                 }
             }
-
             _ => {}
         }
         Ok(None)
     }
 
     fn draw(&mut self, f: &mut Frame<'_>, area: Rect) -> Result<()> {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(99), Constraint::Percentage(1)].as_ref())
+            .split(area);
+
+        // Draw the splash screen in the upper part
         let frame = &self.logo_frames[self.counter];
         let frame_lines: Vec<&str> = frame.lines().collect();
         let total_lines = frame_lines.len() + 1;
-        let lines_above = (area.height as usize - total_lines) / 2;
-        let lines_below = area.height as usize - lines_above - total_lines;
+        let lines_above = (chunks[0].height as usize - total_lines) / 2;
+        let lines_below = chunks[0].height as usize - lines_above - total_lines;
 
         let mut text = Text::default();
         for _ in 0..lines_above {
@@ -138,13 +159,12 @@ impl Component for LoginSplash {
             text.lines.push(Line::from(line));
         }
 
-        // add a blank line between the logo and loading message
+        // Add a blank line between the logo and loading message
         text.lines.push(Line::from(""));
 
         let loading_message = if !self.loading_messages.is_empty() {
             &self.loading_messages[self.counter % self.loading_messages.len()]
         } else {
-            // Add better error messages
             "Loading..."
         };
         text.lines.push(Line::from(loading_message));
@@ -154,7 +174,12 @@ impl Component for LoginSplash {
         }
 
         let p = Paragraph::new(text).alignment(Alignment::Center);
-        f.render_widget(p, area);
+        f.render_widget(p, chunks[0]);
+
+        // Draw the progress gauge in the bottom part
+        let gauge = LineGauge::default().ratio(self.progress);
+        f.render_widget(gauge, chunks[1]);
+
         Ok(())
     }
 }
