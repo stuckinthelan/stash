@@ -4,9 +4,12 @@ use fantoccini::{Client, ClientBuilder, Locator};
 use futures::sink::Send;
 use ratatui::{layout::Constraint, prelude::*};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::{collections::HashMap, env};
-use tokio::sync::mpsc::{self, UnboundedSender};
+use std::process::{Command, Stdio};
+use std::{collections::HashMap, env, sync::Arc};
+use tokio::sync::{
+    mpsc::{self, UnboundedSender},
+    Mutex,
+};
 use tokio::time::{sleep, Duration};
 
 use crate::{
@@ -28,7 +31,7 @@ pub struct App {
     pub last_tick_key_events: Vec<KeyEvent>,
     pub fivver_username: String,
     pub fivver_password: String,
-    pub web_client: Option<Client>,
+    pub web_client: Option<Arc<Mutex<Option<Client>>>>,
 }
 
 impl App {
@@ -201,6 +204,8 @@ impl App {
 
     async fn start_geckodriver(&self) -> Result<()> {
         Command::new("geckodriver")
+            .stdout(Stdio::null())
+            .stdout(Stdio::null())
             .spawn()
             .expect("Failed to start geckodriver");
         Ok(())
@@ -215,17 +220,24 @@ impl App {
             .connect("http://localhost:4444")
             .await
             .expect("failed to connect to WebDriver");
-        self.web_client = Some(client);
+        self.web_client = Some(Arc::new(Mutex::new(Some(client))));
         Ok(())
     }
 
     async fn close_web_client(&mut self) -> Result<()> {
-        if let Some(client) = &self.web_client {
-            // self.web_client
-            //     .close()
-            //     .await
-            //     .expect("Failed to close WebDriver client");
+        if let Some(web_client) = &self.web_client {
+            let mut client = web_client.lock().await;
+            if let Some(client) = client.take() {
+                if let Err(e) = client.close().await {
+                    eprintln!("Failed to close WebDriver client: {}", e);
+                }
+            }
         }
+        // kill the gecko driver process
+        Command::new("pkill")
+            .arg("geckodriver")
+            .output()
+            .expect("Failed to stop geckodriver");
         Ok(())
     }
 }
